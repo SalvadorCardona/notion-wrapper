@@ -1,147 +1,96 @@
-# webapp-wrapper
+# notion-wrapper
 
-Transformez n'importe quelle webapp en application desktop native pour Linux, avec [Tauri](https://tauri.app/).
+Notion as a native desktop application (Linux `.deb` + Windows `.exe`), built with [Tauri](https://tauri.app/).
 
-Bien plus léger qu'Electron (~5-10 Mo par app au lieu de ~150 Mo), utilise le webview système (WebKitGTK).
+Much lighter than Electron (~5-10 MB instead of ~150 MB): uses the system webview (WebKitGTK on Linux, WebView2 on Windows).
 
-## ✨ Fonctionnalités
+## Features
 
-- 📦 Un seul projet pour wrapper plusieurs webapps
-- 🪶 Ultra-léger grâce à Tauri (Rust + WebKitGTK)
-- 🔧 Configuration par fichier JSON simple
-- 🐧 Génère des paquets `.deb` installables sur Ubuntu/Debian
-- 🎨 Téléchargement et conversion automatique de l'icône
+- Native desktop window pointing at https://www.notion.so
+- Cross-platform builds: Linux `.deb` and Windows NSIS `.exe`
+- Automatic icon download and conversion (PNG + ICO)
+- Continuous integration via GitHub Actions
 
-## 📋 Prérequis
+## Prerequisites (local build)
 
-Sur Ubuntu/Debian :
+### Linux (Ubuntu/Debian)
 
 ```bash
-# Dépendances système Tauri
 sudo apt update
 sudo apt install -y \
   libwebkit2gtk-4.1-dev \
   build-essential \
-  curl \
-  wget \
-  file \
-  libxdo-dev \
-  libssl-dev \
+  curl wget file \
+  libxdo-dev libssl-dev \
   libayatana-appindicator3-dev \
-  librsvg2-dev \
-  imagemagick
+  librsvg2-dev imagemagick
 
-# Rust (si pas déjà installé)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
-
-# Tauri CLI
 cargo install tauri-cli --version "^2.0"
-
-# Node.js (via nvm — tu l'as déjà setup)
-# nvm install --lts
 ```
 
-## 🚀 Utilisation
+### Windows
 
-### Lister les apps disponibles
+- [Rust](https://www.rust-lang.org/tools/install) (stable)
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11)
+- [ImageMagick](https://imagemagick.org/script/download.php#windows) (`magick` on `PATH`)
+- Node.js 20+
+- `cargo install tauri-cli --version "^2.0"`
 
-```bash
-npm run list
-```
-
-### Builder une app
+## Build
 
 ```bash
 npm run build:notion
-# ou
-npm run build claude
-# ou directement
-node scripts/build-app.js notion
 ```
 
-Le `.deb` généré se trouve dans `src-tauri/target/release/bundle/deb/`.
+Artifacts:
 
-### Installer
+- Linux: `src-tauri/target/release/bundle/deb/Notion_<version>_amd64.deb`
+- Windows: `src-tauri/target/release/bundle/nsis/Notion_<version>_x64-setup.exe`
+
+## Install
+
+### Linux
 
 ```bash
-sudo dpkg -i src-tauri/target/release/bundle/deb/Notion_0.1.0_amd64.deb
+sudo dpkg -i src-tauri/target/release/bundle/deb/Notion_*_amd64.deb
 ```
 
-L'app apparaît ensuite dans ton menu d'applications GNOME (ou autre).
+Notion appears in the GNOME (or other) application menu under *Productivity*.
 
-### Désinstaller
+### Windows
 
-```bash
-sudo apt remove notion   # ou le nom Cargo
-```
+Run the generated `Notion_<version>_x64-setup.exe` installer.
 
-## 📝 Ajouter une nouvelle app
+## Continuous integration
 
-Crée un fichier `apps/mon-app.json` :
+`.github/workflows/build.yml` builds both targets in parallel:
 
-```json
-{
-  "name": "MonApp",
-  "identifier": "io.animalink.monapp",
-  "url": "https://mon-app.com",
-  "icon": "https://mon-app.com/favicon.ico",
-  "width": 1280,
-  "height": 800,
-  "minWidth": 800,
-  "minHeight": 600,
-  "version": "0.1.0",
-  "description": "MonApp as a desktop app",
-  "category": "Productivity"
-}
-```
+- `ubuntu-22.04` -> `.deb`
+- `windows-latest` -> `.exe` (NSIS)
 
-Puis :
+Artifacts are uploaded under `notion-wrapper-linux-deb` and `notion-wrapper-windows-exe`.
 
-```bash
-node scripts/build-app.js mon-app
-```
+Triggers: pushes/PRs on `main`, version tags (`v*`), and manual `workflow_dispatch`.
 
-### Catégories valides
+## How it works
 
-`AudioVideo`, `Audio`, `Video`, `Development`, `Education`, `Game`, `Graphics`, `Network`, `Office`, `Science`, `Settings`, `System`, `Utility`, `Productivity`
+1. `scripts/build-app.js` reads `apps/notion.json`
+2. Downloads the Notion favicon, generates `icons/icon.png` (512x512) and `icons/icon.ico` (multi-size) via ImageMagick
+3. Generates `src-tauri/tauri.conf.json` with platform-appropriate bundle targets
+4. Runs `cargo tauri build`, which produces a native binary plus the platform installer
 
-## 📦 Apps préconfigurées
+The final app is a Rust binary opening a system webview pointed at Notion. No bundled Chromium, no Node runtime.
 
-| App       | URL                          | Description                        |
-|-----------|------------------------------|------------------------------------|
-| Notion    | notion.so                    | Workspace tout-en-un               |
-| AppFlowy  | appflowy.com                 | Alternative open source à Notion   |
-| SiYuan    | b3log.org/siyuan             | Notes block-based local-first      |
-| Claude    | claude.ai                    | Assistant IA d'Anthropic           |
-| ChatGPT   | chat.openai.com              | Assistant IA d'OpenAI              |
+## Limitations
 
-## 🧠 Comment ça marche
+- Native notifications need extra Rust code in `src-tauri/src/main.rs` (not included)
+- Some sites detect the webview and limit features (rare)
+- The system webview can lag behind Chromium for cutting-edge web APIs
+- Icon badges (notification counters) are not supported by default
 
-1. Le script `build-app.js` lit le JSON de l'app choisie
-2. Il télécharge le favicon et le convertit en PNG 512×512 via ImageMagick
-3. Il génère un `src-tauri/tauri.conf.json` qui dit à Tauri d'ouvrir l'URL dans une fenêtre native
-4. Il lance `cargo tauri build` qui produit un binaire Rust + un paquet `.deb`
-5. Le `.deb` contient l'exécutable, l'icône, un fichier `.desktop` pour l'intégration GNOME
-
-L'app finale est un **binaire Rust** qui ouvre une fenêtre WebKitGTK pointant vers l'URL. Pas de Chromium embarqué, pas de Node.js runtime, juste le webview système.
-
-## ⚠️ Limitations
-
-- Les notifications natives nécessitent du code supplémentaire dans `main.rs` (non inclus ici)
-- Certains sites détectent le webview et limitent des fonctionnalités (rare)
-- Le webview système peut être un peu en retard sur Chromium pour les API web récentes
-- Les badges d'icône (compteur de notifs) ne sont pas supportés par défaut
-
-## 🛠 Améliorations possibles
-
-- Tray icon (icône dans la barre système)
-- Notifications natives (`tauri-plugin-notification`)
-- Raccourcis globaux
-- Profils multiples par app
-- Adblock intégré
-- Cible AppImage en plus de .deb
-
-## 📄 Licence
+## License
 
 MIT
