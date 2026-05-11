@@ -130,7 +130,7 @@ async function generateIcons(sourceIconUrl) {
   } catch (err) {
     if (fs.existsSync(tmpDownload)) fs.unlinkSync(tmpDownload);
     console.warn(`! Could not use remote icon (${err.message}); generating fallback`);
-    if (!imagemagick(['-size', '512x512', 'xc:#1a1a1a', `png:${pngIcon}`])) {
+    if (!imagemagick(['-size', '512x512', 'xc:#1a1a1a', '-alpha', 'on', `PNG32:${pngIcon}`])) {
       die('No icon and ImageMagick unavailable. Install: sudo apt install imagemagick (Linux) or use the Windows runner default.');
     }
     return;
@@ -140,8 +140,10 @@ async function generateIcons(sourceIconUrl) {
   // this avoids `no decode delegate for this image format ''` on IM6.
   const hinted = `${sourceFormat}:${sourcePath}`;
 
-  log(`Generating icon.png (512x512) from ${sourceFormat.toUpperCase()} source`);
-  if (!imagemagick([hinted, '-resize', '512x512', '-background', 'none', '-gravity', 'center', '-extent', '512x512', `png:${pngIcon}`])) {
+  // Tauri 2 requires the icon to be 32-bit RGBA. PNG32: forces a true-color
+  // PNG with an explicit alpha channel even if the source has none.
+  log(`Generating icon.png (512x512, RGBA) from ${sourceFormat.toUpperCase()} source`);
+  if (!imagemagick([hinted, '-alpha', 'on', '-resize', '512x512', '-background', 'none', '-gravity', 'center', '-extent', '512x512', `PNG32:${pngIcon}`])) {
     fs.unlinkSync(sourcePath);
     die('Icon PNG conversion failed (ImageMagick required).');
   }
