@@ -2,7 +2,7 @@
   "name": "Notion",
   "identifier": "app.notionwrapper",
   "url": "https://www.notion.so",
-  "icon": "https://www.notion.so/images/favicon.ico",
+  "icon": "https://www.notion.so/images/logo-ios.png",
   "width": 1280,
   "height": 800,
   "minWidth": 800,
