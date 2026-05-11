@@ -37,23 +37,57 @@ function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(destPath);
-    client.get(url, (res) => {
+    const req = client.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (notion-wrapper build script)' }
+    }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         fs.unlinkSync(destPath);
-        return downloadFile(res.headers.location, destPath).then(resolve, reject);
+        const next = new URL(res.headers.location, url).toString();
+        return downloadFile(next, destPath).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         file.close();
         fs.unlinkSync(destPath);
         return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
       }
+      const contentType = (res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
       res.pipe(file);
-      file.on('finish', () => file.close(resolve));
-    }).on('error', (err) => {
+      file.on('finish', () => file.close(() => resolve({ contentType })));
+    });
+    req.on('error', (err) => {
       fs.unlink(destPath, () => reject(err));
     });
   });
+}
+
+function extensionForContentType(contentType) {
+  switch (contentType) {
+    case 'image/png':       return 'png';
+    case 'image/jpeg':      return 'jpg';
+    case 'image/gif':       return 'gif';
+    case 'image/webp':      return 'webp';
+    case 'image/svg+xml':   return 'svg';
+    case 'image/x-icon':
+    case 'image/vnd.microsoft.icon':
+    case 'image/ico':       return 'ico';
+    default:                return null;
+  }
+}
+
+function detectFormatFromMagicBytes(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(16);
+  const n = fs.readSync(fd, buf, 0, 16, 0);
+  fs.closeSync(fd);
+  if (n >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (n >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (n >= 6 && (buf.slice(0, 6).equals(Buffer.from('GIF87a')) || buf.slice(0, 6).equals(Buffer.from('GIF89a')))) return 'gif';
+  if (n >= 4 && buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0x01 && buf[3] === 0x00) return 'ico';
+  if (n >= 12 && buf.slice(0, 4).equals(Buffer.from('RIFF')) && buf.slice(8, 12).equals(Buffer.from('WEBP'))) return 'webp';
+  if (n >= 5 && buf.slice(0, 5).toString('utf8').toLowerCase() === '<?xml') return 'svg';
+  if (n >= 4 && buf.slice(0, 4).toString('utf8').toLowerCase() === '<svg') return 'svg';
+  return null;
 }
 
 function imagemagick(args) {
@@ -73,35 +107,51 @@ function imagemagick(args) {
 }
 
 async function generateIcons(sourceIconUrl) {
-  const tmpIcon = path.join(ICONS_DIR, '_source');
   const pngIcon = path.join(ICONS_DIR, 'icon.png');
   const icoIcon = path.join(ICONS_DIR, 'icon.ico');
 
   if (!fs.existsSync(ICONS_DIR)) fs.mkdirSync(ICONS_DIR, { recursive: true });
 
+  let sourcePath = null;
+  let sourceFormat = null;
+  const tmpDownload = path.join(ICONS_DIR, '_source');
+
   log(`Downloading icon from ${sourceIconUrl}`);
   try {
-    await downloadFile(sourceIconUrl, tmpIcon);
+    const { contentType } = await downloadFile(sourceIconUrl, tmpDownload);
+    sourceFormat =
+      extensionForContentType(contentType) ||
+      detectFormatFromMagicBytes(tmpDownload);
+    if (!sourceFormat) {
+      throw new Error(`unsupported content (content-type="${contentType || 'unknown'}", no recognizable image magic bytes)`);
+    }
+    sourcePath = path.join(ICONS_DIR, `_source.${sourceFormat}`);
+    fs.renameSync(tmpDownload, sourcePath);
   } catch (err) {
-    console.warn(`! Could not download icon (${err.message}); generating fallback`);
-    if (!imagemagick(['-size', '512x512', "xc:#1a1a1a", pngIcon])) {
+    if (fs.existsSync(tmpDownload)) fs.unlinkSync(tmpDownload);
+    console.warn(`! Could not use remote icon (${err.message}); generating fallback`);
+    if (!imagemagick(['-size', '512x512', 'xc:#1a1a1a', `png:${pngIcon}`])) {
       die('No icon and ImageMagick unavailable. Install: sudo apt install imagemagick (Linux) or use the Windows runner default.');
     }
+    return;
   }
 
-  if (fs.existsSync(tmpIcon)) {
-    log('Generating icon.png (512x512)');
-    if (!imagemagick([tmpIcon, '-resize', '512x512', '-background', 'none', '-gravity', 'center', '-extent', '512x512', pngIcon])) {
-      die('Icon PNG conversion failed (ImageMagick required).');
-    }
+  // Pass an explicit "<format>:<path>" hint so ImageMagick never has to guess —
+  // this avoids `no decode delegate for this image format ''` on IM6.
+  const hinted = `${sourceFormat}:${sourcePath}`;
 
-    log('Generating icon.ico (multi-size for Windows)');
-    if (!imagemagick([tmpIcon, '-define', 'icon:auto-resize=256,128,96,64,48,32,16', icoIcon])) {
-      console.warn('! Could not generate icon.ico — Windows bundle may use a default icon.');
-    }
-
-    fs.unlinkSync(tmpIcon);
+  log(`Generating icon.png (512x512) from ${sourceFormat.toUpperCase()} source`);
+  if (!imagemagick([hinted, '-resize', '512x512', '-background', 'none', '-gravity', 'center', '-extent', '512x512', `png:${pngIcon}`])) {
+    fs.unlinkSync(sourcePath);
+    die('Icon PNG conversion failed (ImageMagick required).');
   }
+
+  log('Generating icon.ico (multi-size for Windows)');
+  if (!imagemagick([hinted, '-define', 'icon:auto-resize=256,128,96,64,48,32,16', `ico:${icoIcon}`])) {
+    console.warn('! Could not generate icon.ico — Windows bundle may use a default icon.');
+  }
+
+  fs.unlinkSync(sourcePath);
 }
 
 function bundleTargetsForPlatform() {
