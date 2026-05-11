@@ -1,0 +1,13 @@
+{
+  "name": "Claude",
+  "identifier": "io.animalink.claude",
+  "url": "https://claude.ai",
+  "icon": "https://claude.ai/favicon.ico",
+  "width": 1280,
+  "height": 800,
+  "minWidth": 800,
+  "minHeight": 600,
+  "version": "0.1.0",
+  "description": "Claude AI as a desktop app",
+  "category": "Utility"
+}

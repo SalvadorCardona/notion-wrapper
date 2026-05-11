@@ -1,0 +1,13 @@
+{
+  "name": "SiYuan",
+  "identifier": "io.animalink.siyuan",
+  "url": "https://b3log.org/siyuan/",
+  "icon": "https://b3log.org/siyuan/favicon.ico",
+  "width": 1280,
+  "height": 800,
+  "minWidth": 800,
+  "minHeight": 600,
+  "version": "0.1.0",
+  "description": "SiYuan as a desktop app",
+  "category": "Productivity"
+}

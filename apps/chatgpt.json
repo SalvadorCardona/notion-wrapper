@@ -1,0 +1,13 @@
+{
+  "name": "ChatGPT",
+  "identifier": "io.animalink.chatgpt",
+  "url": "https://chat.openai.com",
+  "icon": "https://chat.openai.com/favicon.ico",
+  "width": 1280,
+  "height": 800,
+  "minWidth": 800,
+  "minHeight": 600,
+  "version": "0.1.0",
+  "description": "ChatGPT as a desktop app",
+  "category": "Utility"
+}

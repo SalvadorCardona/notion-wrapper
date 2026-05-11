@@ -1,0 +1,13 @@
+{
+  "name": "Notion",
+  "identifier": "io.animalink.notion",
+  "url": "https://www.notion.so",
+  "icon": "https://www.notion.so/images/favicon.ico",
+  "width": 1280,
+  "height": 800,
+  "minWidth": 800,
+  "minHeight": 600,
+  "version": "0.1.0",
+  "description": "Notion as a desktop app",
+  "category": "Productivity"
+}

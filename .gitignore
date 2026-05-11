@@ -1,0 +1,7 @@
+node_modules/
+src-tauri/target/
+src-tauri/icons/icon.png
+src-tauri/icons/_*
+src-tauri/Cargo.lock
+*.deb
+.DS_Store

@@ -1,0 +1,18 @@
+{
+  "name": "webapp-wrapper",
+  "version": "0.1.0",
+  "description": "Wrap any webapp as a native Linux desktop app via Tauri",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build-app.js",
+    "build:notion": "node scripts/build-app.js notion",
+    "build:appflowy": "node scripts/build-app.js appflowy",
+    "build:claude": "node scripts/build-app.js claude",
+    "build:chatgpt": "node scripts/build-app.js chatgpt",
+    "build:siyuan": "node scripts/build-app.js siyuan",
+    "list": "ls -1 apps/ | sed 's/\\.json$//'",
+    "dev": "node scripts/build-app.js"
+  },
+  "author": "animalink",
+  "license": "MIT"
+}
