@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * build-app.js — Build a webapp wrapper for a specific app
+ * build-app.js — Build the Notion desktop wrapper
  *
  * Usage:
- *   node scripts/build-app.js <app-name>
- *   npm run build:app -- notion
+ *   node scripts/build-app.js [app-name]   (defaults to "notion")
  */
 
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const { execSync } = require('child_process');
+const os = require('os');
+const { execSync, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const APPS_DIR = path.join(ROOT, 'apps');
@@ -20,15 +20,17 @@ const ICONS_DIR = path.join(TAURI_DIR, 'icons');
 const CONF_PATH = path.join(TAURI_DIR, 'tauri.conf.json');
 const CARGO_PATH = path.join(TAURI_DIR, 'Cargo.toml');
 
+const PLATFORM = os.platform(); // 'linux' | 'win32' | 'darwin'
+
 // ---------- helpers ----------
 
 function die(msg) {
-  console.error(`❌ ${msg}`);
+  console.error(`X ${msg}`);
   process.exit(1);
 }
 
 function log(msg) {
-  console.log(`▶ ${msg}`);
+  console.log(`> ${msg}`);
 }
 
 function downloadFile(url, destPath) {
@@ -36,7 +38,6 @@ function downloadFile(url, destPath) {
     const client = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(destPath);
     client.get(url, (res) => {
-      // handle redirects
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         fs.unlinkSync(destPath);
@@ -55,11 +56,26 @@ function downloadFile(url, destPath) {
   });
 }
 
-async function generateIcons(sourceIconUrl, appName) {
-  // Tauri on Linux needs at minimum a PNG icon.
-  // We download the favicon and convert/copy it with ImageMagick if available.
-  const tmpIcon = path.join(ICONS_DIR, `_${appName}-source`);
-  const finalIcon = path.join(ICONS_DIR, 'icon.png');
+function imagemagick(args) {
+  // ImageMagick 7 ships `magick`; IM 6 / Linux distros ship `convert`.
+  // On Windows, `convert` collides with a built-in shell command, so prefer `magick`.
+  const candidates = PLATFORM === 'win32'
+    ? ['magick', 'magick convert']
+    : ['magick convert', 'convert'];
+  for (const cmd of candidates) {
+    const [bin, ...rest] = cmd.split(' ');
+    const result = spawnSync(bin, [...rest, ...args], { stdio: 'inherit' });
+    if (result.status === 0) return true;
+    if (result.error && result.error.code === 'ENOENT') continue;
+    if (result.status !== 0) return false;
+  }
+  return false;
+}
+
+async function generateIcons(sourceIconUrl) {
+  const tmpIcon = path.join(ICONS_DIR, '_source');
+  const pngIcon = path.join(ICONS_DIR, 'icon.png');
+  const icoIcon = path.join(ICONS_DIR, 'icon.ico');
 
   if (!fs.existsSync(ICONS_DIR)) fs.mkdirSync(ICONS_DIR, { recursive: true });
 
@@ -67,55 +83,79 @@ async function generateIcons(sourceIconUrl, appName) {
   try {
     await downloadFile(sourceIconUrl, tmpIcon);
   } catch (err) {
-    console.warn(`⚠ Could not download icon (${err.message}); using fallback`);
-    // Fallback: create a 512x512 blank PNG via ImageMagick if no source
-    try {
-      execSync(`convert -size 512x512 xc:'#1a1a1a' "${finalIcon}"`, { stdio: 'inherit' });
-      return;
-    } catch {
-      die('No icon available and ImageMagick (convert) not found. Install with: sudo apt install imagemagick');
+    console.warn(`! Could not download icon (${err.message}); generating fallback`);
+    if (!imagemagick(['-size', '512x512', "xc:#1a1a1a", pngIcon])) {
+      die('No icon and ImageMagick unavailable. Install: sudo apt install imagemagick (Linux) or use the Windows runner default.');
     }
   }
 
-  // Convert to PNG 512x512 (Tauri/Linux preferred size)
-  try {
-    execSync(`convert "${tmpIcon}" -resize 512x512 -background none -gravity center -extent 512x512 "${finalIcon}"`, { stdio: 'inherit' });
-    fs.unlinkSync(tmpIcon);
-  } catch (err) {
-    // If convert fails (e.g. SVG without rsvg), fall back to a copy if it's already PNG
-    if (sourceIconUrl.endsWith('.png')) {
-      fs.copyFileSync(tmpIcon, finalIcon);
-      fs.unlinkSync(tmpIcon);
-    } else {
-      die(`Icon conversion failed: ${err.message}. Install: sudo apt install imagemagick librsvg2-bin`);
+  if (fs.existsSync(tmpIcon)) {
+    log('Generating icon.png (512x512)');
+    if (!imagemagick([tmpIcon, '-resize', '512x512', '-background', 'none', '-gravity', 'center', '-extent', '512x512', pngIcon])) {
+      die('Icon PNG conversion failed (ImageMagick required).');
     }
+
+    log('Generating icon.ico (multi-size for Windows)');
+    if (!imagemagick([tmpIcon, '-define', 'icon:auto-resize=256,128,96,64,48,32,16', icoIcon])) {
+      console.warn('! Could not generate icon.ico — Windows bundle may use a default icon.');
+    }
+
+    fs.unlinkSync(tmpIcon);
+  }
+}
+
+function bundleTargetsForPlatform() {
+  switch (PLATFORM) {
+    case 'linux': return ['deb'];
+    case 'win32': return ['nsis'];
+    case 'darwin': return ['dmg', 'app'];
+    default: return [];
+  }
+}
+
+function bundleOutputDir() {
+  return path.join(TAURI_DIR, 'target', 'release', 'bundle');
+}
+
+function reportArtifacts() {
+  const root = bundleOutputDir();
+  if (!fs.existsSync(root)) return;
+  const found = [];
+  for (const sub of fs.readdirSync(root)) {
+    const dir = path.join(root, sub);
+    if (!fs.statSync(dir).isDirectory()) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (/\.(deb|exe|msi|dmg|AppImage)$/i.test(f)) {
+        found.push(path.join(dir, f));
+      }
+    }
+  }
+  if (found.length) {
+    console.log('\nBuild complete. Artifacts:');
+    found.forEach(p => console.log(`  ${p}`));
   }
 }
 
 // ---------- main ----------
 
 async function main() {
-  const appName = process.argv[2];
-  if (!appName) {
-    console.log('Available apps:');
-    fs.readdirSync(APPS_DIR)
-      .filter(f => f.endsWith('.json'))
-      .forEach(f => console.log(`  - ${f.replace('.json', '')}`));
-    die('Usage: node scripts/build-app.js <app-name>');
-  }
-
+  const appName = process.argv[2] || 'notion';
   const configPath = path.join(APPS_DIR, `${appName}.json`);
   if (!fs.existsSync(configPath)) {
     die(`App config not found: ${configPath}`);
   }
 
   const appConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  log(`Building wrapper for: ${appConfig.name} (${appConfig.url})`);
+  log(`Building wrapper for: ${appConfig.name} (${appConfig.url}) on ${PLATFORM}`);
 
-  // 1. Generate icon
-  await generateIcons(appConfig.icon, appName);
+  await generateIcons(appConfig.icon);
 
-  // 2. Generate tauri.conf.json from template
+  const targets = bundleTargetsForPlatform();
+  if (!targets.length) die(`Unsupported platform: ${PLATFORM}`);
+
+  const iconsList = ['icons/icon.png'];
+  if (fs.existsSync(path.join(ICONS_DIR, 'icon.ico'))) iconsList.push('icons/icon.ico');
+
   const conf = {
     "$schema": "https://schema.tauri.app/config/2",
     productName: appConfig.name,
@@ -141,11 +181,11 @@ async function main() {
     },
     bundle: {
       active: true,
-      targets: ["deb"],
-      icon: ["icons/icon.png"],
+      targets,
+      icon: iconsList,
       category: appConfig.category || "Utility",
       shortDescription: appConfig.description || `${appConfig.name} as desktop app`,
-      longDescription: appConfig.description || `${appConfig.name} packaged as a native Linux desktop application via Tauri`,
+      longDescription: appConfig.description || `${appConfig.name} packaged as a native desktop application via Tauri`,
       linux: {
         deb: {
           depends: ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
@@ -155,15 +195,13 @@ async function main() {
   };
 
   fs.writeFileSync(CONF_PATH, JSON.stringify(conf, null, 2));
-  log(`Wrote ${CONF_PATH}`);
+  log(`Wrote ${CONF_PATH} (targets: ${targets.join(', ')})`);
 
-  // 3. Update Cargo.toml package name to match (kebab-case)
   const cargoName = appName.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   let cargo = fs.readFileSync(CARGO_PATH, 'utf8');
   cargo = cargo.replace(/^name = ".*"/m, `name = "${cargoName}"`);
   fs.writeFileSync(CARGO_PATH, cargo);
 
-  // 4. Run tauri build
   log('Running: cargo tauri build');
   try {
     execSync('cargo tauri build', {
@@ -171,21 +209,11 @@ async function main() {
       stdio: 'inherit',
       env: { ...process.env }
     });
-  } catch (err) {
+  } catch {
     die('Tauri build failed');
   }
 
-  // 5. Locate the .deb
-  const debDir = path.join(TAURI_DIR, 'target', 'release', 'bundle', 'deb');
-  if (fs.existsSync(debDir)) {
-    const debs = fs.readdirSync(debDir).filter(f => f.endsWith('.deb'));
-    if (debs.length) {
-      console.log('\n✅ Build complete!');
-      console.log(`📦 Package: ${path.join(debDir, debs[0])}`);
-      console.log(`\nInstall with:`);
-      console.log(`  sudo dpkg -i "${path.join(debDir, debs[0])}"`);
-    }
-  }
+  reportArtifacts();
 }
 
 main().catch(err => die(err.message));

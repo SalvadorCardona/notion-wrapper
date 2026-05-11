@@ -1,8 +1,7 @@
 [package]
-name = "webapp-wrapper"
+name = "notion-wrapper"
 version = "0.1.0"
-description = "Generic webapp wrapper for Linux desktop"
-authors = ["animalink"]
+description = "Notion as a native desktop app"
 edition = "2021"
 
 [build-dependencies]

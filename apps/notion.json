@@ -1,6 +1,6 @@
 {
   "name": "Notion",
-  "identifier": "io.animalink.notion",
+  "identifier": "app.notionwrapper",
   "url": "https://www.notion.so",
   "icon": "https://www.notion.so/images/favicon.ico",
   "width": 1280,
